@@ -1,0 +1,19 @@
+# Herramientas / IDE
+.idea/
+.claude/
+
+# Android
+android/.gradle/
+android/.idea/
+android/local.properties
+android/keystore.properties
+android/keystore/
+android/.kotlin/
+android/app/build/
+android/build/
+android/captures/
+*.iml
+
+# QuickJS build scratch (el binario final libqjs.so SI se versiona)
+tools/third_party/
+tools/build-quickjs-arm64/
