@@ -51,11 +51,21 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
 
 cmake --build "$BUILD_DIR" -j
 
+STRIP_BIN="$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-strip* 2>/dev/null | head -1)"
+if [ -z "$STRIP_BIN" ]; then
+    echo "No se encontro llvm-strip dentro del NDK ($ANDROID_NDK_HOME)." >&2
+    exit 1
+fi
+
 mkdir -p "$OUT_DIR"
+# El NDK compila con -g aunque sea Release: sin strip el binario pesa ~15 MB,
+# casi todo informacion de depuracion. Con strip queda en ~1.4 MB.
+# Se descarto MinSizeRel (-Os): ahorra solo ~300 KB y es ~20% mas lento
+# resolviendo JS, que es el camino critico de YouTube.
 # El nombre exacto del binario resultante puede variar segun la version
 # (qjs vs qjs_exe); si esta copia falla, correr primero:
 #   cmake --build "$BUILD_DIR" --target help
-cp "$BUILD_DIR/qjs" "$OUT_DIR/libqjs.so"
+"$STRIP_BIN" --strip-all -o "$OUT_DIR/libqjs.so" "$BUILD_DIR/qjs"
 
 echo "Listo: $OUT_DIR/libqjs.so"
 echo ""
