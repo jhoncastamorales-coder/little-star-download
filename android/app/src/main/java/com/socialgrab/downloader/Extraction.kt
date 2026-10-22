@@ -43,6 +43,9 @@ class Extractor(private val context: Context) {
 
     private fun qjsPath() = "${context.applicationInfo.nativeLibraryDir}/libqjs.so"
 
+    // Dentro de la cache de la app, para que Android pueda liberarla si le falta espacio.
+    private fun cacheDir() = "${context.cacheDir.absolutePath}/yt-dlp"
+
     private fun module(): PyObject {
         PythonRuntime.ensureStarted(context)
         return Python.getInstance().getModule("socialgrab_bridge")
@@ -50,7 +53,7 @@ class Extractor(private val context: Context) {
 
     /** Lista las calidades de video disponibles, sin descargar nada. Blocking: correr en Dispatchers.IO. */
     fun listQualities(url: String): VideoInfo {
-        val resultJson = module().callAttr("list_qualities", url, qjsPath()).toString()
+        val resultJson = module().callAttr("list_qualities", url, qjsPath(), cacheDir()).toString()
         val json = JSONObject(resultJson)
         if (json.has("error")) {
             throw IllegalStateException(json.getString("error"))
@@ -79,7 +82,7 @@ class Extractor(private val context: Context) {
     /** Resuelve las URLs directas para la calidad elegida. Blocking: correr en Dispatchers.IO. */
     fun resolveFormat(url: String, formatId: String, hasAudio: Boolean): ExtractionResult {
         val resultJson = module()
-            .callAttr("resolve_format", url, formatId, hasAudio, qjsPath())
+            .callAttr("resolve_format", url, formatId, hasAudio, qjsPath(), cacheDir())
             .toString()
         val json = JSONObject(resultJson)
 

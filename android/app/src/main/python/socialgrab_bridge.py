@@ -1,7 +1,11 @@
 import json
+import os
+import shutil
 import time
 
 import yt_dlp
+import yt_dlp_ejs
+from yt_dlp.extractor.youtube.jsc._builtin import quickjs as _qjs
 
 # Cachea el resultado de extract_info para que resolve_format no tenga que
 # resolver de nuevo el reto de JavaScript (lo mas lento) si list_qualities ya
@@ -9,19 +13,61 @@ import yt_dlp
 # fuera creciendo sin limite en memoria durante la sesion).
 _info_cache = {"url": None, "info": None}
 
+# Para resolver el reto de YouTube, QuickJS primero "preprocesa" el reproductor
+# (un JS de ~2.5 MB): en un telefono de gama baja eso toma ~17 s y es casi toda
+# la busqueda. yt-dlp puede guardar el reproductor ya preprocesado en su cache
+# (con eso baja a ~3 s), pero lo trae apagado porque en una PC esos archivos
+# (~4 MB cada uno) se acumulan sin limite; aqui se guardan solo los ultimos
+# (_prune_players).
+_qjs.QuickJSJCP._ENABLE_PREPROCESSED_PLAYER_CACHE = True
+_MAX_CACHED_PLAYERS = 2
+_old_versions_removed = False
 
-def _common_flags(qjs_path: str) -> list:
+
+def _versioned_cache_dir(cache_dir: str) -> str:
+    """Una carpeta por version de yt-dlp y del resolvedor: un reproductor
+    preprocesado por otra version podria no servirle a esta. Las carpetas de
+    versiones anteriores se borran la primera vez."""
+    global _old_versions_removed
+    current = f"{yt_dlp.version.__version__}-{yt_dlp_ejs.version}"
+    if not _old_versions_removed:
+        try:
+            for entry in os.scandir(cache_dir):
+                if entry.name != current:
+                    shutil.rmtree(entry.path, ignore_errors=True)
+        except OSError:
+            pass  # la carpeta todavia no existe
+        _old_versions_removed = True
+    return os.path.join(cache_dir, current)
+
+
+def _prune_players(cache_dir: str) -> None:
+    """Deja solo los reproductores preprocesados mas recientes (YouTube cambia
+    de reproductor cada tanto y cada uno pesa bastante)."""
+    folder = os.path.join(cache_dir, "challenge-solver")
+    try:
+        players = [e for e in os.scandir(folder) if e.name.startswith("player")]
+        players.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+        for old in players[_MAX_CACHED_PLAYERS:]:
+            os.remove(old.path)
+    except OSError:
+        pass
+
+
+def _common_flags(qjs_path: str, cache_dir: str) -> list:
     return [
         "--no-playlist",
         "--quiet",
         "--no-warnings",
-        "--no-cache-dir",
+        "--cache-dir", cache_dir,
         "--js-runtimes", f"quickjs:{qjs_path}",
     ]
 
 
-def _extract(url: str, qjs_path: str) -> dict:
-    argv = _common_flags(qjs_path) + [url]
+def _extract(url: str, qjs_path: str, cache_dir: str) -> dict:
+    cache_dir = _versioned_cache_dir(cache_dir)
+    _prune_players(cache_dir)
+    argv = _common_flags(qjs_path, cache_dir) + [url]
     _, _, _, ydl_opts = yt_dlp.parse_options(argv)
 
     # Algunos sitios (TikTok sobre todo) a veces bloquean/responden raro de
@@ -40,10 +86,10 @@ def _extract(url: str, qjs_path: str) -> dict:
     raise last_exc
 
 
-def list_qualities(url: str, qjs_path: str) -> str:
+def list_qualities(url: str, qjs_path: str, cache_dir: str) -> str:
     """Devuelve el titulo y las calidades de video disponibles (sin descargar nada)."""
     try:
-        info = _extract(url, qjs_path)
+        info = _extract(url, qjs_path, cache_dir)
     except Exception as exc:  # yt-dlp levanta muchos tipos de excepcion distintos
         return json.dumps({"error": str(exc)})
 
@@ -116,14 +162,14 @@ def list_qualities(url: str, qjs_path: str) -> str:
     })
 
 
-def resolve_format(url: str, format_id: str, has_audio: bool, qjs_path: str) -> str:
+def resolve_format(url: str, format_id: str, has_audio: bool, qjs_path: str, cache_dir: str) -> str:
     """Resuelve las URLs directas de descarga para la calidad elegida, reusando
     la extraccion de list_qualities si todavia esta en cache (evita resolver
     el reto de JavaScript dos veces)."""
     info = _info_cache["info"] if _info_cache["url"] == url else None
     if info is None:
         try:
-            info = _extract(url, qjs_path)
+            info = _extract(url, qjs_path, cache_dir)
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
