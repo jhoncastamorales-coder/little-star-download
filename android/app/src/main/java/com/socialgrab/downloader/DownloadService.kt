@@ -84,11 +84,9 @@ class DownloadService : Service() {
             when (result) {
                 is ExtractionResult.Direct -> {
                     val fileName = "${sanitizeFileName(result.title)}.${result.ext}"
-                    val tmp = File(cacheDir, "direct_${System.currentTimeMillis()}.${result.ext}")
-                    downloader.downloadToFile(result.url, tmp) { p -> setStage(DownloadStage.DownloadingVideo(p)) }
-                    setStage(DownloadStage.Saving)
-                    downloader.saveFileToDownloads(tmp, fileName, "video/${result.ext}")
-                    tmp.delete()
+                    downloader.downloadToDownloads(result.url, fileName, "video/${result.ext}") { p ->
+                        setStage(DownloadStage.DownloadingVideo(p))
+                    }
                     setStage(DownloadStage.Done(fileName))
                 }
 

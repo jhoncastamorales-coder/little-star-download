@@ -1,7 +1,9 @@
 package com.socialgrab.downloader
 
 import android.content.Context
+import com.chaquo.python.PyObject
 import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import org.json.JSONObject
 
 data class QualityOption(
@@ -26,11 +28,25 @@ sealed class ExtractionResult {
     ) : ExtractionResult()
 }
 
+// Python arranca la primera vez que se usa, en un hilo de fondo, y no al abrir
+// la app: ahi bloqueaba el hilo principal antes de mostrar la primera pantalla.
+private object PythonRuntime {
+    @Synchronized
+    fun ensureStarted(context: Context) {
+        if (!Python.isStarted()) {
+            Python.start(AndroidPlatform(context.applicationContext))
+        }
+    }
+}
+
 class Extractor(private val context: Context) {
 
     private fun qjsPath() = "${context.applicationInfo.nativeLibraryDir}/libqjs.so"
 
-    private fun module() = Python.getInstance().getModule("socialgrab_bridge")
+    private fun module(): PyObject {
+        PythonRuntime.ensureStarted(context)
+        return Python.getInstance().getModule("socialgrab_bridge")
+    }
 
     /** Lista las calidades de video disponibles, sin descargar nada. Blocking: correr en Dispatchers.IO. */
     fun listQualities(url: String): VideoInfo {
