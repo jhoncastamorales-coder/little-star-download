@@ -21,8 +21,8 @@ android {
         applicationId = "com.socialgrab.downloader"
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
