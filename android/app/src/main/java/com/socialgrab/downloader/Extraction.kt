@@ -9,13 +9,19 @@ import org.json.JSONObject
 data class QualityOption(
     val formatId: String,
     val height: Int,
+    val width: Int?,
     val fps: Int?,
     val ext: String,
     val filesizeBytes: Long?,
     val hasAudio: Boolean,
 )
 
-data class VideoInfo(val title: String, val qualities: List<QualityOption>)
+data class VideoInfo(
+    val title: String,
+    val thumbnailUrl: String?,
+    val durationSeconds: Int?,
+    val qualities: List<QualityOption>,
+)
 
 sealed class ExtractionResult {
     data class Direct(val title: String, val url: String, val ext: String) : ExtractionResult()
@@ -65,6 +71,7 @@ class Extractor(private val context: Context) {
             QualityOption(
                 formatId = q.getString("format_id"),
                 height = q.getInt("height"),
+                width = if (q.isNull("width")) null else q.getInt("width"),
                 fps = if (q.isNull("fps")) null else q.getInt("fps"),
                 ext = q.optString("ext", "mp4"),
                 filesizeBytes = if (q.isNull("filesize")) null else q.getLong("filesize"),
@@ -76,7 +83,12 @@ class Extractor(private val context: Context) {
             throw IllegalStateException("No se encontraron calidades de video disponibles.")
         }
 
-        return VideoInfo(title = json.getString("title"), qualities = qualities)
+        return VideoInfo(
+            title = json.getString("title"),
+            thumbnailUrl = if (json.isNull("thumbnail")) null else json.getString("thumbnail"),
+            durationSeconds = if (json.isNull("duration")) null else json.getInt("duration"),
+            qualities = qualities,
+        )
     }
 
     /** Resuelve las URLs directas para la calidad elegida. Blocking: correr en Dispatchers.IO. */

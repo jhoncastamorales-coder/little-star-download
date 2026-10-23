@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -15,11 +16,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -47,6 +52,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -104,12 +111,30 @@ class MainActivity : ComponentActivity() {
 private fun formatSize(bytes: Long): String =
     if (bytes >= 1024L * 1024) "%.1f MB".format(bytes / (1024.0 * 1024)) else "${bytes / 1024} KB"
 
-private fun QualityOption.details(): String =
-    listOfNotNull(
-        ext.uppercase(),
-        fps?.takeIf { it > 30 }?.let { "$it fps" },
-        filesizeBytes?.takeIf { it > 0 }?.let { "~${formatSize(it)}" },
-    ).joinToString(" · ")
+// En videos verticales (reels) el alto es el lado largo: un 1080x1920 es "1080p",
+// no "1920p". Se usa el lado corto, que es como se nombran las calidades.
+private val QualityOption.resolution: Int
+    get() = width?.let { minOf(it, height) } ?: height
+
+private val QualityOption.label: String
+    get() = "${resolution}p"
+
+private val QualityOption.tier: String
+    get() = when {
+        resolution >= 2160 -> "4K"
+        resolution >= 1440 -> "2K"
+        resolution >= 1080 -> "Full HD"
+        resolution >= 720 -> "HD"
+        resolution >= 360 -> "SD"
+        else -> "Baja"
+    }
+
+private fun formatDuration(seconds: Int): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
 
 @Composable
 fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
@@ -137,7 +162,7 @@ fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
         scope.launch {
             try {
                 val info = withContext(Dispatchers.IO) { extractor.listQualities(url) }
-                searchStage = SearchStage.Choosing(url = url, title = info.title, qualities = info.qualities)
+                searchStage = SearchStage.Choosing(url = url, info = info)
             } catch (e: Exception) {
                 searchStage = SearchStage.Failed(e.message ?: "Error desconocido")
             }
@@ -237,8 +262,7 @@ fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
 
         when (val current = searchStage) {
             is SearchStage.Choosing -> ResultsSection(
-                title = current.title,
-                qualities = current.qualities,
+                info = current.info,
                 selected = selectedQuality,
                 busy = busy,
                 onSelect = { selectedQuality = it },
@@ -289,33 +313,35 @@ private fun ToggleOption(selected: Boolean, label: String, onClick: () -> Unit) 
 
 @Composable
 private fun ResultsSection(
-    title: String,
-    qualities: List<QualityOption>,
+    info: VideoInfo,
     selected: QualityOption?,
     busy: Boolean,
     onSelect: (QualityOption) -> Unit,
     onDownload: (QualityOption) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        VideoHeader(info)
+
         Text(
             "Elige una calidad",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        qualities.forEach { quality ->
-            QualityCard(
-                quality = quality,
-                selected = quality == selected,
-                enabled = !busy,
-                onClick = { onSelect(quality) },
-            )
+        // Dos por fila: con 4-6 calidades entra todo en la pantalla sin scroll.
+        info.qualities.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { quality ->
+                    QualityTile(
+                        quality = quality,
+                        selected = quality == selected,
+                        enabled = !busy,
+                        onClick = { onSelect(quality) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
         }
 
         Button(
@@ -327,7 +353,7 @@ private fun ResultsSection(
                 .height(46.dp),
         ) {
             Text(
-                if (selected != null) "Descargar ${selected.height}p" else "Elige una calidad",
+                selected?.let { "Descargar ${it.label} · ${it.tier}" } ?: "Elige una calidad",
                 style = MaterialTheme.typography.labelLarge,
             )
         }
@@ -335,12 +361,78 @@ private fun ResultsSection(
 }
 
 @Composable
-private fun QualityCard(quality: QualityOption, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun VideoHeader(info: VideoInfo) {
+    val scheme = MaterialTheme.colorScheme
+    val image by produceState<ImageBitmap?>(initialValue = null, info.thumbnailUrl) {
+        value = info.thumbnailUrl?.let { withContext(Dispatchers.IO) { Thumbnail.load(it) } }
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(128.dp)
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(scheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            image?.let {
+                Image(
+                    bitmap = it,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } ?: Text("▶", color = scheme.onSurfaceVariant)
+
+            info.durationSeconds?.let {
+                Text(
+                    formatDuration(it),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                )
+            }
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                info.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (info.qualities.size == 1) "1 calidad" else "${info.qualities.size} calidades",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QualityTile(
+    quality: QualityOption,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val scheme = MaterialTheme.colorScheme
     Card(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) scheme.primaryContainer else scheme.surface,
@@ -350,30 +442,29 @@ private fun QualityCard(quality: QualityOption, selected: Boolean, enabled: Bool
             color = if (selected) scheme.primary else scheme.outline,
         ),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${quality.height}p",
+                    quality.label,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
                 )
-                val details = quality.details()
-                if (details.isNotEmpty()) {
-                    Text(
-                        details,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant,
-                    )
+                if (selected) {
+                    Text("✓", style = MaterialTheme.typography.titleSmall, color = scheme.primary)
                 }
             }
-            if (selected) {
-                Text("✓", style = MaterialTheme.typography.titleMedium, color = scheme.primary)
-            }
+            Text(
+                listOfNotNull(quality.tier, quality.fps?.takeIf { it > 30 }?.let { "$it fps" })
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.primary,
+            )
+            Text(
+                quality.filesizeBytes?.takeIf { it > 0 }?.let { "~${formatSize(it)}" } ?: "Tamaño desconocido",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
         }
     }
 }

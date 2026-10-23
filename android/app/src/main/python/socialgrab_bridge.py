@@ -141,6 +141,7 @@ def list_qualities(url: str, qjs_path: str, cache_dir: str) -> str:
             by_height[height] = {
                 "format_id": f["format_id"],
                 "height": height,
+                "width": f.get("width"),
                 "fps": f.get("fps"),
                 "ext": f.get("ext"),
                 "filesize": filesize,
@@ -158,6 +159,8 @@ def list_qualities(url: str, qjs_path: str, cache_dir: str) -> str:
 
     return json.dumps({
         "title": info.get("title") or "video",
+        "thumbnail": info.get("thumbnail"),
+        "duration": int(duration) if duration else None,
         "qualities": qualities,
     })
 
