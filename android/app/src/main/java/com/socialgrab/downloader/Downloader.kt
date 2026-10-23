@@ -5,16 +5,19 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 
 private const val BUFFER_SIZE = 64 * 1024
+private const val CHUNK_SIZE = 10L * 1024 * 1024
 
 class Downloader(private val context: Context) {
 
@@ -45,32 +48,78 @@ class Downloader(private val context: Context) {
         }
 
     private fun streamUrl(url: String, out: OutputStream, onProgress: (Int) -> Unit) {
-        val request = Request.Builder().url(url).build()
+        val progress = Progress(onProgress)
+        if (url.toHttpUrlOrNull()?.host?.endsWith("googlevideo.com") == true) {
+            streamInChunks(url, out, progress)
+            return
+        }
 
-        client.newCall(request).execute().use { response ->
+        client.newCall(Request.Builder().url(url).build()).execute().use { response ->
             if (!response.isSuccessful) {
                 throw IOException("No se pudo descargar (${response.code})")
             }
             val body = response.body ?: throw IOException("Respuesta vacia")
-            val total = body.contentLength()
-            var bytesRead = 0L
-            var lastReportedPercent = -1
+            progress.total = body.contentLength()
+            copy(body.byteStream(), out, progress)
+        }
+    }
 
-            body.byteStream().use { input ->
-                val buffer = ByteArray(BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
-                    out.write(buffer, 0, read)
-                    bytesRead += read
-                    if (total > 0) {
-                        val percent = ((bytesRead * 100) / total).toInt()
-                        if (percent != lastReportedPercent) {
-                            lastReportedPercent = percent
-                            onProgress(percent)
-                        }
-                    }
+    // YouTube frena a ~60 KB/s las descargas que piden el archivo entero; por
+    // partes de 10 MB (como hace yt-dlp) las sirve a la velocidad de la red.
+    private fun streamInChunks(url: String, out: OutputStream, progress: Progress) {
+        while (progress.total < 0 || progress.bytes < progress.total) {
+            val start = progress.bytes
+            val request = Request.Builder()
+                .url(url)
+                .header("Range", "bytes=$start-${start + CHUNK_SIZE - 1}")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("No se pudo descargar (${response.code})")
                 }
+                val body = response.body ?: throw IOException("Respuesta vacia")
+                if (response.code != 206) {
+                    // El servidor ignoro el Range y manda el archivo entero
+                    progress.total = body.contentLength()
+                    copy(body.byteStream(), out, progress)
+                    return
+                }
+                // Content-Range: bytes 0-10485759/36254812
+                progress.total = response.header("Content-Range")
+                    ?.substringAfterLast('/')?.toLongOrNull()
+                    ?: throw IOException("Respuesta sin tamano total")
+                copy(body.byteStream(), out, progress)
+            }
+            if (progress.bytes == start) throw IOException("La descarga no avanza")
+        }
+    }
+
+    private class Progress(private val onProgress: (Int) -> Unit) {
+        var total = -1L
+        var bytes = 0L
+        private var lastPercent = -1
+
+        fun add(read: Int) {
+            bytes += read
+            if (total > 0) {
+                val percent = ((bytes * 100) / total).toInt()
+                if (percent != lastPercent) {
+                    lastPercent = percent
+                    onProgress(percent)
+                }
+            }
+        }
+    }
+
+    private fun copy(input: InputStream, out: OutputStream, progress: Progress) {
+        input.use {
+            val buffer = ByteArray(BUFFER_SIZE)
+            while (true) {
+                val read = it.read(buffer)
+                if (read == -1) break
+                out.write(buffer, 0, read)
+                progress.add(read)
             }
         }
     }
