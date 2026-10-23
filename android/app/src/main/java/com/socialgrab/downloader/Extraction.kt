@@ -32,7 +32,7 @@ data class VideoInfo(
     val audioOptions: List<AudioOption>,
 )
 
-data class AudioSource(val title: String, val artist: String?, val url: String)
+data class AudioSource(val title: String, val artist: String?, val thumbnailUrl: String?, val url: String)
 
 sealed class ExtractionResult {
     data class Direct(val title: String, val url: String, val ext: String) : ExtractionResult()
@@ -127,6 +127,7 @@ class Extractor(private val context: Context) {
         return AudioSource(
             title = json.getString("title"),
             artist = if (json.isNull("artist")) null else json.getString("artist"),
+            thumbnailUrl = if (json.isNull("thumbnail")) null else json.getString("thumbnail"),
             url = json.getString("url"),
         )
     }
