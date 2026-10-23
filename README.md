@@ -6,7 +6,7 @@ sin anuncios, sin cuentas y sin que tu link pase por ningún servidor ajeno.
 
 ### 📲 [Descargar Little Star (.apk)](https://raw.githubusercontent.com/jhoncastamorales-coder/little-star-download/main/releases/LittleStar.apk)
 
-Versión actual: **1.2** — búsquedas de YouTube hasta 3 veces más rápidas.
+Versión actual: **1.3** — descargas de YouTube mucho más rápidas y videos que se combinan en segundos.
 
 > No está en Google Play (es de uso personal), así que Android va a avisar
 > que es de "origen desconocido" al instalarla. Es normal: solo hay que
