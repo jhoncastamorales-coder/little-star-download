@@ -275,5 +275,6 @@ def resolve_audio(url: str, format_id: str, qjs_path: str, cache_dir: str) -> st
     return json.dumps({
         "title": info.get("title") or "audio",
         "artist": info.get("artist") or info.get("uploader"),
+        "thumbnail": info.get("thumbnail"),
         "url": f["url"],
     })

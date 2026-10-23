@@ -129,6 +129,7 @@ class DownloadService : Service() {
     private fun runAudioDownload(url: String, formatId: String, codec: String) {
         val tmp = File(cacheDir, "audio_${System.currentTimeMillis()}")
         val out = File(cacheDir, "song_${System.currentTimeMillis()}")
+        val tagged = File(cacheDir, "tagged_${System.currentTimeMillis()}")
         try {
             setStage(DownloadStage.PreparingDownload)
             val source = Extractor(applicationContext).resolveAudio(url, formatId)
@@ -139,14 +140,22 @@ class DownloadService : Service() {
             setStage(DownloadStage.Saving)
             val output = if (codec == "opus") AudioRemuxer.OPUS else AudioRemuxer.AAC
             AudioRemuxer.remux(tmp, out, output)
+            val song = try {
+                val tags = AudioTags.Tags(source.title, source.artist, source.thumbnailUrl?.let(Thumbnail::coverJpeg))
+                if (codec == "opus") AudioTags.writeOpus(out, tagged, tags) else AudioTags.writeM4a(out, tagged, tags)
+                tagged
+            } catch (e: Exception) {
+                out // sin caratula ni etiquetas la cancion igual se escucha
+            }
             val fileName = "${sanitizeFileName(source.title)}.${output.extension}"
-            Downloader(applicationContext).saveFileToMusic(out, fileName, output.mimeType, source.title, source.artist)
+            Downloader(applicationContext).saveFileToMusic(song, fileName, output.mimeType, source.title, source.artist)
             setStage(DownloadStage.Done(fileName, folder = "Música/LittleStar"))
         } catch (e: Exception) {
             setStage(DownloadStage.Failed(e.message ?: "Error desconocido"))
         } finally {
             tmp.delete()
             out.delete()
+            tagged.delete()
         }
     }
 
