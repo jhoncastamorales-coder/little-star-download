@@ -145,6 +145,7 @@ fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
     var videoUrl by remember(initialUrl) { mutableStateOf(initialUrl) }
     var searchStage by remember { mutableStateOf<SearchStage>(SearchStage.Idle) }
     var selectedQuality by remember { mutableStateOf<QualityOption?>(null) }
+    var selectedAudio by remember { mutableStateOf<AudioOption?>(null) }
     val downloadStage by DownloadStatus.stage.collectAsState()
     val busy = downloadStage.isBusy()
 
@@ -158,6 +159,7 @@ fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
         }
         val url = videoUrl.trim()
         selectedQuality = null
+        selectedAudio = null
         searchStage = SearchStage.Resolving
         scope.launch {
             try {
@@ -172,6 +174,7 @@ fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
     fun clearAll() {
         searchStage = SearchStage.Idle
         selectedQuality = null
+        selectedAudio = null
         DownloadStatus.stage.value = DownloadStage.Idle
     }
 
@@ -264,10 +267,15 @@ fun DownloaderScreen(initialUrl: String, themeSettings: ThemeSettings) {
             is SearchStage.Choosing -> ResultsSection(
                 info = current.info,
                 selected = selectedQuality,
+                selectedAudio = selectedAudio,
                 busy = busy,
                 onSelect = { selectedQuality = it },
+                onSelectAudio = { selectedAudio = it },
                 onDownload = { quality ->
                     DownloadService.start(context, current.url, quality.formatId, quality.hasAudio)
+                },
+                onDownloadAudio = { audio ->
+                    DownloadService.startAudio(context, current.url, audio.formatId, audio.codec)
                 },
             )
 
@@ -315,12 +323,26 @@ private fun ToggleOption(selected: Boolean, label: String, onClick: () -> Unit) 
 private fun ResultsSection(
     info: VideoInfo,
     selected: QualityOption?,
+    selectedAudio: AudioOption?,
     busy: Boolean,
     onSelect: (QualityOption) -> Unit,
+    onSelectAudio: (AudioOption) -> Unit,
     onDownload: (QualityOption) -> Unit,
+    onDownloadAudio: (AudioOption) -> Unit,
 ) {
+    var audioMode by remember(info) { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         VideoHeader(info)
+
+        if (info.audioOptions.isNotEmpty()) {
+            ModeToggle(audioMode = audioMode, enabled = !busy, onChange = { audioMode = it })
+        }
+
+        if (audioMode) {
+            AudioChoices(info.audioOptions, selectedAudio, busy, onSelectAudio, onDownloadAudio)
+            return@Column
+        }
 
         Text(
             "Elige una calidad",
@@ -357,6 +379,96 @@ private fun ResultsSection(
                 style = MaterialTheme.typography.labelLarge,
             )
         }
+    }
+}
+
+@Composable
+private fun ModeToggle(audioMode: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(3.dp),
+    ) {
+        ModeOption("Video", selected = !audioMode, enabled = enabled, modifier = Modifier.weight(1f)) { onChange(false) }
+        ModeOption("Solo audio", selected = audioMode, enabled = enabled, modifier = Modifier.weight(1f)) { onChange(true) }
+    }
+}
+
+@Composable
+private fun ModeOption(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) scheme.primary else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) scheme.onPrimary else scheme.onSurfaceVariant,
+        )
+    }
+}
+
+private val AudioOption.title: String
+    get() = if (codec == "opus") "Máxima calidad" else "Compatible"
+
+private val AudioOption.format: String
+    get() = listOfNotNull(
+        if (codec == "opus") "OPUS" else "M4A",
+        bitrateKbps?.let { "$it kbps" },
+    ).joinToString(" · ")
+
+@Composable
+private fun AudioChoices(
+    options: List<AudioOption>,
+    selected: AudioOption?,
+    busy: Boolean,
+    onSelect: (AudioOption) -> Unit,
+    onDownload: (AudioOption) -> Unit,
+) {
+    Text(
+        "Se guarda en Música/LittleStar, lista para tu reproductor",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { audio ->
+            ChoiceTile(
+                title = audio.title,
+                subtitle = audio.format,
+                size = audio.filesizeBytes,
+                selected = audio == selected,
+                enabled = !busy,
+                onClick = { onSelect(audio) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (options.size == 1) Spacer(Modifier.weight(1f))
+    }
+    Button(
+        onClick = { selected?.let(onDownload) },
+        enabled = selected != null && !busy,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(46.dp),
+    ) {
+        Text(
+            selected?.let { "Descargar audio · ${it.format}" } ?: "Elige un formato",
+            style = MaterialTheme.typography.labelLarge,
+        )
     }
 }
 
@@ -427,6 +539,25 @@ private fun QualityTile(
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+) = ChoiceTile(
+    title = quality.label,
+    subtitle = listOfNotNull(quality.tier, quality.fps?.takeIf { it > 30 }?.let { "$it fps" }).joinToString(" · "),
+    size = quality.filesizeBytes,
+    selected = selected,
+    enabled = enabled,
+    onClick = onClick,
+    modifier = modifier,
+)
+
+@Composable
+private fun ChoiceTile(
+    title: String,
+    subtitle: String,
+    size: Long?,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
     Card(
@@ -445,7 +576,7 @@ private fun QualityTile(
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    quality.label,
+                    title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -455,13 +586,12 @@ private fun QualityTile(
                 }
             }
             Text(
-                listOfNotNull(quality.tier, quality.fps?.takeIf { it > 30 }?.let { "$it fps" })
-                    .joinToString(" · "),
+                subtitle,
                 style = MaterialTheme.typography.labelMedium,
                 color = scheme.primary,
             )
             Text(
-                quality.filesizeBytes?.takeIf { it > 0 }?.let { "~${formatSize(it)}" } ?: "Tamaño desconocido",
+                size?.takeIf { it > 0 }?.let { "~${formatSize(it)}" } ?: "Tamaño desconocido",
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
             )
@@ -487,7 +617,7 @@ private fun StatusCard(stage: DownloadStage) {
         is DownloadStage.DownloadingAudio -> "Descargando audio... ${stage.progress}%"
         is DownloadStage.Combining -> "Combinando video y audio... ${stage.progress}%"
         DownloadStage.Saving -> "Guardando..."
-        is DownloadStage.Done -> "Listo: guardado en Descargas/LittleStar/${stage.fileName}"
+        is DownloadStage.Done -> "Listo: guardado en ${stage.folder}/${stage.fileName}"
         is DownloadStage.Failed -> "Error: ${stage.message}"
     }
     val isError = stage is DownloadStage.Failed

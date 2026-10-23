@@ -7,7 +7,7 @@ sealed class DownloadStage {
     data class DownloadingAudio(val progress: Int) : DownloadStage()
     data class Combining(val progress: Int) : DownloadStage()
     object Saving : DownloadStage()
-    data class Done(val fileName: String) : DownloadStage()
+    data class Done(val fileName: String, val folder: String = "Descargas/LittleStar") : DownloadStage()
     data class Failed(val message: String) : DownloadStage()
 }
 

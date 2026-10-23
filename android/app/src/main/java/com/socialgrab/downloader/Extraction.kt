@@ -16,12 +16,23 @@ data class QualityOption(
     val hasAudio: Boolean,
 )
 
+/** Pista de solo-audio: "opus" (maxima calidad de YouTube) o "aac" (compatible). */
+data class AudioOption(
+    val formatId: String,
+    val codec: String,
+    val bitrateKbps: Int?,
+    val filesizeBytes: Long?,
+)
+
 data class VideoInfo(
     val title: String,
     val thumbnailUrl: String?,
     val durationSeconds: Int?,
     val qualities: List<QualityOption>,
+    val audioOptions: List<AudioOption>,
 )
+
+data class AudioSource(val title: String, val artist: String?, val url: String)
 
 sealed class ExtractionResult {
     data class Direct(val title: String, val url: String, val ext: String) : ExtractionResult()
@@ -88,6 +99,35 @@ class Extractor(private val context: Context) {
             thumbnailUrl = if (json.isNull("thumbnail")) null else json.getString("thumbnail"),
             durationSeconds = if (json.isNull("duration")) null else json.getInt("duration"),
             qualities = qualities,
+            audioOptions = parseAudioOptions(json),
+        )
+    }
+
+    private fun parseAudioOptions(json: JSONObject): List<AudioOption> {
+        val array = json.optJSONArray("audio") ?: return emptyList()
+        return (0 until array.length()).map { i ->
+            val a = array.getJSONObject(i)
+            AudioOption(
+                formatId = a.getString("format_id"),
+                codec = a.getString("codec"),
+                bitrateKbps = if (a.isNull("bitrate")) null else a.getInt("bitrate"),
+                filesizeBytes = if (a.isNull("filesize")) null else a.getLong("filesize"),
+            )
+        }
+    }
+
+    /** URL directa de la pista de audio elegida. Blocking: correr en Dispatchers.IO. */
+    fun resolveAudio(url: String, formatId: String): AudioSource {
+        val json = JSONObject(
+            module().callAttr("resolve_audio", url, formatId, qjsPath(), cacheDir()).toString()
+        )
+        if (json.has("error")) {
+            throw IllegalStateException(json.getString("error"))
+        }
+        return AudioSource(
+            title = json.getString("title"),
+            artist = if (json.isNull("artist")) null else json.getString("artist"),
+            url = json.getString("url"),
         )
     }
 

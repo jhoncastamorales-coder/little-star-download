@@ -47,6 +47,24 @@ class Downloader(private val context: Context) {
             source.inputStream().use { input -> input.copyTo(out, BUFFER_SIZE) }
         }
 
+    /**
+     * Copia una cancion a Musica/LittleStar marcada como musica, con titulo y
+     * artista, para que el reproductor del telefono la encuentre y la muestre
+     * como cualquier otra. Blocking: correr en Dispatchers.IO.
+     */
+    fun saveFileToMusic(source: File, fileName: String, mimeType: String, title: String, artist: String?): Uri =
+        writeToMediaStore(
+            collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            relativePath = "${Environment.DIRECTORY_MUSIC}/LittleStar",
+            fileName = fileName,
+            mimeType = mimeType,
+            extra = ContentValues().apply {
+                put(MediaStore.Audio.Media.IS_MUSIC, 1)
+                put(MediaStore.Audio.Media.TITLE, title)
+                artist?.let { put(MediaStore.Audio.Media.ARTIST, it) }
+            },
+        ) { out -> source.inputStream().use { input -> input.copyTo(out, BUFFER_SIZE) } }
+
     private fun streamUrl(url: String, out: OutputStream, onProgress: (Int) -> Unit) {
         val progress = Progress(onProgress)
         if (url.toHttpUrlOrNull()?.host?.endsWith("googlevideo.com") == true) {
@@ -124,17 +142,33 @@ class Downloader(private val context: Context) {
         }
     }
 
+    private fun writeToDownloads(fileName: String, mimeType: String, write: (OutputStream) -> Unit): Uri =
+        writeToMediaStore(
+            collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            relativePath = "${Environment.DIRECTORY_DOWNLOADS}/LittleStar",
+            fileName = fileName,
+            mimeType = mimeType,
+            write = write,
+        )
+
     // La entrada queda "pendiente" mientras se escribe (la galeria no muestra un
     // video a medias) y se borra si algo falla, para no dejar archivos rotos.
-    private fun writeToDownloads(fileName: String, mimeType: String, write: (OutputStream) -> Unit): Uri {
+    private fun writeToMediaStore(
+        collection: Uri,
+        relativePath: String,
+        fileName: String,
+        mimeType: String,
+        extra: ContentValues = ContentValues(),
+        write: (OutputStream) -> Unit,
+    ): Uri {
         val resolver = context.contentResolver
-        val values = ContentValues().apply {
+        val values = ContentValues(extra).apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/LittleStar")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        val uri = resolver.insert(collection, values)
             ?: throw IOException("No se pudo crear el archivo de destino")
 
         try {
