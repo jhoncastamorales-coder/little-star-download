@@ -162,7 +162,51 @@ def list_qualities(url: str, qjs_path: str, cache_dir: str) -> str:
         "thumbnail": info.get("thumbnail"),
         "duration": int(duration) if duration else None,
         "qualities": qualities,
+        "audio": _audio_options(formats, duration),
     })
+
+
+def _audio_formats(formats: list) -> list:
+    """Pistas de solo-audio descargables con un GET simple (sin HLS/DASH)."""
+    return [
+        f for f in formats
+        if f.get("vcodec") == "none"
+        and (f.get("acodec") or "none") != "none"
+        and str(f.get("protocol") or "").startswith("http")
+        # YouTube tambien ofrece versiones "drc" (volumen comprimido) de cada audio
+        and "drc" not in str(f.get("format_id"))
+    ]
+
+
+def _audio_options(formats: list, duration) -> list:
+    """El mejor audio Opus (maxima calidad de YouTube) y el mejor AAC
+    (compatible con cualquier reproductor). Otras redes solo dan AAC."""
+    by_codec = {}
+    for f in _audio_formats(formats):
+        acodec = str(f.get("acodec"))
+        codec = "opus" if acodec.startswith("opus") else "aac" if acodec.startswith(("mp4a", "aac")) else None
+        if codec is None:
+            continue
+        current = by_codec.get(codec)
+        if current is None or (f.get("abr") or 0) > (current.get("abr") or 0):
+            by_codec[codec] = f
+
+    options = []
+    for codec in ("opus", "aac"):
+        f = by_codec.get(codec)
+        if f is None:
+            continue
+        abr = f.get("abr")
+        filesize = f.get("filesize") or f.get("filesize_approx")
+        if not filesize and abr and duration:
+            filesize = int(abr * duration * 1000 / 8)
+        options.append({
+            "format_id": f["format_id"],
+            "codec": codec,
+            "bitrate": int(abr) if abr else None,
+            "filesize": filesize,
+        })
+    return options
 
 
 def resolve_format(url: str, format_id: str, has_audio: bool, qjs_path: str, cache_dir: str) -> str:
@@ -213,4 +257,23 @@ def resolve_format(url: str, format_id: str, has_audio: bool, qjs_path: str, cac
         "video_ext": video_f.get("ext") or "mp4",
         "audio_url": audio_f["url"],
         "audio_ext": audio_f.get("ext") or "m4a",
+    })
+
+
+def resolve_audio(url: str, format_id: str, qjs_path: str, cache_dir: str) -> str:
+    """URL directa de la pista de audio elegida (reusa la extraccion en cache)."""
+    info = _info_cache["info"] if _info_cache["url"] == url else None
+    if info is None:
+        try:
+            info = _extract(url, qjs_path, cache_dir)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    f = next((f for f in info.get("formats") or [] if f.get("format_id") == format_id), None)
+    if f is None:
+        return json.dumps({"error": "Ese audio ya no esta disponible, busca de nuevo."})
+    return json.dumps({
+        "title": info.get("title") or "audio",
+        "artist": info.get("artist") or info.get("uploader"),
+        "url": f["url"],
     })

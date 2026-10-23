@@ -46,6 +46,7 @@ class DownloadService : Service() {
         val url = intent?.getStringExtra(EXTRA_URL)
         val formatId = intent?.getStringExtra(EXTRA_FORMAT_ID)
         val hasAudio = intent?.getBooleanExtra(EXTRA_HAS_AUDIO, false) ?: false
+        val audioCodec = intent?.getStringExtra(EXTRA_AUDIO_CODEC)
 
         if (url == null || formatId == null) {
             stopSelf(startId)
@@ -55,7 +56,11 @@ class DownloadService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification("Preparando descarga...", null))
 
         serviceScope.launch {
-            runDownload(url, formatId, hasAudio)
+            if (audioCodec != null) {
+                runAudioDownload(url, formatId, audioCodec)
+            } else {
+                runDownload(url, formatId, hasAudio)
+            }
             stopForeground(STOP_FOREGROUND_DETACH)
             stopSelf(startId)
         }
@@ -71,11 +76,6 @@ class DownloadService : Service() {
     private suspend fun runDownload(url: String, formatId: String, hasAudio: Boolean) {
         val extractor = Extractor(applicationContext)
         val downloader = Downloader(applicationContext)
-
-        fun setStage(s: DownloadStage) {
-            DownloadStatus.stage.value = s
-            updateNotification(s)
-        }
 
         try {
             setStage(DownloadStage.PreparingDownload)
@@ -118,6 +118,35 @@ class DownloadService : Service() {
             }
         } catch (e: Exception) {
             setStage(DownloadStage.Failed(e.message ?: "Error desconocido"))
+        }
+    }
+
+    private fun setStage(s: DownloadStage) {
+        DownloadStatus.stage.value = s
+        updateNotification(s)
+    }
+
+    private fun runAudioDownload(url: String, formatId: String, codec: String) {
+        val tmp = File(cacheDir, "audio_${System.currentTimeMillis()}")
+        val out = File(cacheDir, "song_${System.currentTimeMillis()}")
+        try {
+            setStage(DownloadStage.PreparingDownload)
+            val source = Extractor(applicationContext).resolveAudio(url, formatId)
+            Downloader(applicationContext).downloadToFile(source.url, tmp) { p ->
+                setStage(DownloadStage.DownloadingAudio(p))
+            }
+
+            setStage(DownloadStage.Saving)
+            val output = if (codec == "opus") AudioRemuxer.OPUS else AudioRemuxer.AAC
+            AudioRemuxer.remux(tmp, out, output)
+            val fileName = "${sanitizeFileName(source.title)}.${output.extension}"
+            Downloader(applicationContext).saveFileToMusic(out, fileName, output.mimeType, source.title, source.artist)
+            setStage(DownloadStage.Done(fileName, folder = "Música/LittleStar"))
+        } catch (e: Exception) {
+            setStage(DownloadStage.Failed(e.message ?: "Error desconocido"))
+        } finally {
+            tmp.delete()
+            out.delete()
         }
     }
 
@@ -176,12 +205,23 @@ class DownloadService : Service() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_FORMAT_ID = "format_id"
         private const val EXTRA_HAS_AUDIO = "has_audio"
+        private const val EXTRA_AUDIO_CODEC = "audio_codec"
 
         fun start(context: Context, url: String, formatId: String, hasAudio: Boolean) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 putExtra(EXTRA_URL, url)
                 putExtra(EXTRA_FORMAT_ID, formatId)
                 putExtra(EXTRA_HAS_AUDIO, hasAudio)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** Descarga solo el audio y lo guarda como cancion en Musica/LittleStar. */
+        fun startAudio(context: Context, url: String, formatId: String, codec: String) {
+            val intent = Intent(context, DownloadService::class.java).apply {
+                putExtra(EXTRA_URL, url)
+                putExtra(EXTRA_FORMAT_ID, formatId)
+                putExtra(EXTRA_AUDIO_CODEC, codec)
             }
             ContextCompat.startForegroundService(context, intent)
         }
