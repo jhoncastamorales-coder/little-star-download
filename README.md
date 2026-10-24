@@ -46,3 +46,8 @@ Little Star funciona distinto:
 | Facebook | ✅ |
 | Twitter/X | ✅ |
 | TikTok | ❌ (su propio sistema anti-bot bloquea la descarga desde el teléfono) |
+
+## Licencia
+
+[CC BY-NC 4.0](LICENSE): podés compartir y modificar Little Star dando crédito,
+pero no usarla con fines comerciales.
