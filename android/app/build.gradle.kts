@@ -6,6 +6,11 @@ plugins {
     id("com.chaquo.python")
 }
 
+// local.properties no se sube al repo: guarda rutas propias de cada PC.
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
@@ -88,11 +93,12 @@ android {
 // que es lo unico que el launcher `py` detecta en esta PC, no esta soportado
 // todavia) -- se usa 3.13, instalada aparte via uv, indicandole la ruta exacta
 // a Chaquopy porque el launcher `py -3.13` no la detecta (no es una instalacion
-// "estandar" de python.org).
+// "estandar" de python.org). La ruta va en local.properties como
+// chaquopy.buildPython=<ruta a python.exe>, porque es propia de cada PC.
 chaquopy {
     defaultConfig {
         version = "3.13"
-        buildPython("C:/Users/jhonx/AppData/Roaming/uv/python/cpython-3.13.16-windows-x86_64-none/python.exe")
+        localProperties.getProperty("chaquopy.buildPython")?.let { buildPython(it) }
         pip {
             install("yt-dlp")
             install("yt-dlp-ejs")
